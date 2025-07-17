@@ -17,3 +17,5 @@ conda install -c conda-forge libstdcxx-ng
 
 export LD_LIBRARY_PATH=/home/$USER/.conda/envs/whisper-env/lib/python3.9/site-packages/nvidia/cudnn/lib/:$LD_LIBRARY_PATH
 ```
+
+https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#macos-and-linux
