@@ -1,0 +1,19 @@
+name: whisperx-gpu
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - ffmpeg
+  - pytorch=2.2.0
+  - torchvision=0.17.0
+  - torchaudio=2.2.0
+  - pytorch-cuda=12.1
+  - numpy=1.26.4
+  - pip:
+    - whisperx
+    - pyaudio
+    - sounddevice
+    - "transformers[audio,torch]"
