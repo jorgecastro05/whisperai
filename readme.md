@@ -1,6 +1,8 @@
 ## Different implementations for whisper AI Live Captions.
 the latest implementation is fasterwhisper.
 
+sudo apt install nvidia-cuda-toolkit
+
 ### Conda tutorial:
 
 ```bash
@@ -17,7 +19,7 @@ conda install -c conda-forge libstdcxx-ng
 
 https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#macos-and-linux
 
-export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.9/site-packages/nvidia/cudnn/lib/:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.9/site-packages/nvidia/cudnn/lib/
 
 name: whisper-env
 channels:
