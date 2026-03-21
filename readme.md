@@ -1,9 +1,29 @@
 ## Different implementations for whisper AI Live Captions.
-the latest implementation is fasterwhisper.
+the latest implementation Realtime TTS
+Exposes captions via http
 
-sudo apt install nvidia-cuda-toolkit
+## Realtime TTS
 
-### Conda tutorial:
+~~~bash
+conda create -n realtimestt python=3.11 -y
+conda activate realtimestt
+sudo dnf install -y portaudio-devel ffmpeg
+pip install torch==2.7.1+cu128 torchaudio==2.7.1+cu128 \
+  --index-url https://download.pytorch.org/whl/cu128
+git clone https://github.com/KoljaB/RealtimeSTT.git
+cd RealtimeSTT
+
+pip install -r requirements-gpu.txt
+pip install -e .
+python -c "import torch; print(torch.cuda.get_device_name(0))"
+
+~~~
+
+### Running
+
+
+
+### Fasterwhisper implementation (Old):
 
 ```bash
 conda create --name whisper-env python=3.9

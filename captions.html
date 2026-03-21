@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+body {
+    margin: 0;
+    background: transparent;
+    overflow: hidden;
+}
+
+#captions {
+    position: absolute;
+    bottom: 10%;
+    width: 100%;
+    text-align: center;
+    font-size: 36px;
+    font-family: Arial;
+    color: white;
+    text-shadow: 2px 2px 6px black;
+    transition: opacity 0.3s ease;
+}
+</style>
+</head>
+<body>
+
+<div id="captions"></div>
+
+<script>
+const BASE_URL = "http://localhost:8765";
+const TIMEOUT = 5000;
+
+let lastUpdate = 0;
+
+async function updateCaptions() {
+    try {
+        const [textRes, timeRes] = await Promise.all([
+            fetch(BASE_URL + "/captions"),
+            fetch(BASE_URL + "/last_update")
+        ]);
+
+        const text = await textRes.text();
+        const serverTime = parseFloat(await timeRes.text()) * 1000;
+
+        const now = Date.now();
+        const el = document.getElementById("captions");
+
+        if (text.trim() !== "") {
+            el.textContent = text;
+        }
+
+        // Hide if stale
+        if (now - serverTime > TIMEOUT) {
+            el.style.opacity = 0;
+        } else {
+            el.style.opacity = 1;
+        }
+
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+setInterval(updateCaptions, 500);
+</script>
+
+</body>
+</html>
