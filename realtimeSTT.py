@@ -3,11 +3,16 @@ import os
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
+from http.server import ThreadingHTTPServer
 
 HOST = "0.0.0.0"
 PORT = 8765
 
-PROMPT_FILE = "prompt.txt"
+# Get script directory (important!)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+PROMPT_FILE = os.path.join(BASE_DIR, "prompt.txt")
+HTML_FILE = os.path.join(BASE_DIR, "captions.html")
 
 latest_text = ""
 last_update = 0
@@ -23,23 +28,39 @@ def load_prompt(file_path):
 def process_text(text):
     global latest_text, last_update
 
-    print(text)
+    print(text, flush=True)
     latest_text = text
     last_update = time.time()
 
 
 class CaptionHandler(BaseHTTPRequestHandler):
+
     def log_message(self, format, *args):
         return
 
     def do_GET(self):
-        if self.path == "/captions":
+
+        # Serve captions.html
+        if self.path == "/":
+            if os.path.exists(HTML_FILE):
+                with open(HTML_FILE, "rb") as f:
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/html")
+                    self.end_headers()
+                    self.wfile.write(f.read())
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        # Return captions text
+        elif self.path == "/captions":
             self.send_response(200)
             self.send_header("Content-type", "text/plain")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(latest_text.encode("utf-8"))
 
+        # Return last update timestamp
         elif self.path == "/last_update":
             self.send_response(200)
             self.send_header("Content-type", "text/plain")
@@ -51,22 +72,27 @@ class CaptionHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+
 def realtime_update(text):
     global latest_text, last_update
     latest_text = text
     last_update = time.time()
 
+
 def start_server():
-    server = HTTPServer((HOST, PORT), CaptionHandler)
-    print(f"HTTP server running at http://localhost:{PORT}")
+    #server = HTTPServer((HOST, PORT), CaptionHandler)
+    server = ThreadingHTTPServer((HOST, PORT), CaptionHandler)
+    print(f"HTTP server running at http://localhost:{PORT}", flush=True)
     server.serve_forever()
+
+def recorder_loop():
+    recorder = AudioToTextRecorder(**recorder_config)
+    while True:
+        recorder.text(process_text)
 
 
 if __name__ == '__main__':
-    print("Wait until it says 'speak now'")
-
-    # Start HTTP server in background thread
-    threading.Thread(target=start_server, daemon=True).start()
+    print("Wait until it says 'speak now'", flush=True)
 
     unknown_sentence_detection_pause = 0.7
 
@@ -80,7 +106,7 @@ if __name__ == '__main__':
         'silero_sensitivity': 0.05,
         'webrtc_sensitivity': 3,
         'post_speech_silence_duration': unknown_sentence_detection_pause,
-        'min_length_of_recording': 1.1,        
+        'min_length_of_recording': 1.5,        
         'min_gap_between_recordings': 0,                
         'enable_realtime_transcription': True,
         'realtime_processing_pause': 0.02,
@@ -107,7 +133,8 @@ if __name__ == '__main__':
         'initial_prompt': load_prompt(PROMPT_FILE)
     }
 
-    recorder = AudioToTextRecorder(**recorder_config)
+    # Start recorder in background thread
+    threading.Thread(target=recorder_loop, daemon=True).start()
 
-    while True:
-        recorder.text(process_text)
+    # Run server in MAIN thread (important!)
+    start_server()
