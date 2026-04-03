@@ -116,18 +116,11 @@ if __name__ == '__main__':
         'silero_deactivity_detection': True,
         'early_transcription_on_silence': 0,
         'beam_size': 3,
-        'beam_size_realtime': 3,
+        'beam_size_realtime': 2,
         # 'batch_size': 0,
         # 'realtime_batch_size': 0,        
         'no_log_file': True,
-        'initial_prompt_realtime': (
-            "End incomplete sentences with ellipses.\n"
-            "Examples:\n"
-            "Complete: The sky is blue.\n"
-            "Incomplete: When the sky...\n"
-            "Complete: She walked home.\n"
-            "Incomplete: Because he...\n"
-        ),
+        'initial_prompt_realtime': load_prompt(PROMPT_FILE),
         'silero_use_onnx': True,
         'faster_whisper_vad_filter': False,
         'initial_prompt': load_prompt(PROMPT_FILE)

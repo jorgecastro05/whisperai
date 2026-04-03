@@ -17,6 +17,8 @@ pip install -r requirements-gpu.txt
 pip install -e .
 python -c "import torch; print(torch.cuda.get_device_name(0))"
 
+
+PYTHONPATH=~/RealtimeSTT conda run -n realtimestt python ~/whisperai/realtimeSTT.py
 ~~~
 
 ### Fasterwhisper implementation (Old):
