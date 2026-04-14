@@ -14,11 +14,17 @@ body {
     bottom: 10%;
     width: 100%;
     text-align: center;
-    font-size: 40px;
+    font-size: 38px;
     font-family: Arial;
-    color: #FFD700;
-    text-shadow: 2px 2px 6px black;
+    color: #FFFFFF;
     transition: opacity 0.3s ease;
+}
+
+#captions span {
+    display: inline-block;
+    background-color: rgba(0, 0, 0, 0.8);
+    padding: 6px 12px;
+    border-radius: 6px;
 }
 </style>
 </head>
@@ -46,7 +52,7 @@ async function updateCaptions() {
         const el = document.getElementById("captions");
 
         if (text.trim() !== "") {
-            el.textContent = text;
+            el.innerHTML = `<span>${text}</span>`;
         }
 
         // Hide if stale
