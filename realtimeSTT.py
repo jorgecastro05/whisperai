@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 from http.server import ThreadingHTTPServer
 import re
+import signal
 
 HOST = "0.0.0.0"
 PORT = 8765
@@ -18,6 +19,11 @@ BLACKLIST_FILE = os.path.join(BASE_DIR, "blacklistwords.txt")
 
 latest_text = ""
 last_update = 0
+
+stop_event = threading.Event()
+server = None  # global reference
+recorder = None
+shutting_down = False
 
 
 def load_file(file_path):
@@ -105,19 +111,55 @@ def realtime_update(text):
 
 
 def start_server():
-    #server = HTTPServer((HOST, PORT), CaptionHandler)
+    global server
     server = ThreadingHTTPServer((HOST, PORT), CaptionHandler)
     print(f"HTTP server running at http://localhost:{PORT}", flush=True)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        print("Shutting down HTTP server...")
+        server.server_close()
 
 def recorder_loop():
+    global recorder
     recorder = AudioToTextRecorder(**recorder_config)
-    while True:
-        recorder.text(process_text)
+    try:
+        while not stop_event.is_set():
+            recorder.text(process_text)
+    except Exception as e:
+        print(f"Recorder exception: {e}")
+    finally:
+        print("Recorder loop exited")
+
+def shutdown_handler(signum, frame):
+    global shutting_down
+
+    if shutting_down:
+        print("Force exiting...")
+        os._exit(1)
+
+    shutting_down = True
+    print("\nStopping gracefully...")
+
+    stop_event.set()
+
+    if recorder:
+        try:
+            recorder.shutdown()
+        except Exception as e:
+            print(f"Error stopping recorder: {e}")
+
+    if server:
+        server.shutdown()
 
 
 if __name__ == '__main__':
     print("Wait until it says 'speak now'", flush=True)
+
+    signal.signal(signal.SIGINT, shutdown_handler)
+    signal.signal(signal.SIGTERM, shutdown_handler)
 
     unknown_sentence_detection_pause = 0.7
 
@@ -152,7 +194,17 @@ if __name__ == '__main__':
     }
 
     # Start recorder in background thread
-    threading.Thread(target=recorder_loop, daemon=True).start()
+    recorder_thread = threading.Thread(target=recorder_loop)
+    recorder_thread.start()
 
-    # Run server in MAIN thread (important!)
-    start_server()
+    try:
+        start_server()
+    finally:
+        stop_event.set()
+        recorder_thread.join(timeout=5)
+
+        if recorder_thread.is_alive():
+            print("Recorder stuck → forcing exit")
+            os._exit(1)
+
+        print("Exited cleanly")
