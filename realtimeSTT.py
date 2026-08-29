@@ -1,4 +1,5 @@
 from RealtimeSTT import AudioToTextRecorder
+from RealtimeSTT.transcription_engines.base import BaseTranscriptionEngine
 import os
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -6,6 +7,10 @@ import threading
 from http.server import ThreadingHTTPServer
 import re
 import signal
+
+# Ensure base engine has a close method so RealtimeSTT shutdown doesn't raise AttributeError
+if not hasattr(BaseTranscriptionEngine, "close"):
+    BaseTranscriptionEngine.close = lambda self: None
 
 HOST = "0.0.0.0"
 PORT = 8765
@@ -133,26 +138,28 @@ def recorder_loop():
     finally:
         print("Recorder loop exited")
 
-def shutdown_handler(signum, frame):
+def shutdown_handler(signum=None, frame=None):
     global shutting_down
 
     if shutting_down:
         print("Force exiting...")
-        os._exit(1)
+        os._exit(0)
 
     shutting_down = True
     print("\nStopping gracefully...")
 
     stop_event.set()
 
+    # Unblock the HTTP server thread/main loop first
+    if server:
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    # Shut down recorder
     if recorder:
         try:
             recorder.shutdown()
         except Exception as e:
             print(f"Error stopping recorder: {e}")
-
-    if server:
-        server.shutdown()
 
 
 if __name__ == '__main__':
@@ -194,17 +201,15 @@ if __name__ == '__main__':
     }
 
     # Start recorder in background thread
-    recorder_thread = threading.Thread(target=recorder_loop)
+    recorder_thread = threading.Thread(target=recorder_loop, daemon=True)
     recorder_thread.start()
 
     try:
         start_server()
+    except KeyboardInterrupt:
+        shutdown_handler()
     finally:
-        stop_event.set()
-        recorder_thread.join(timeout=5)
-
-        if recorder_thread.is_alive():
-            print("Recorder stuck → forcing exit")
-            os._exit(1)
-
+        shutdown_handler()
+        recorder_thread.join(timeout=2)
         print("Exited cleanly")
+        os._exit(0)
