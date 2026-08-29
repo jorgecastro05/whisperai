@@ -1,5 +1,6 @@
 ### Installing (homebrew)
 
+```bash
 brew install uv
 brew install portaudio
 brew install direnv
@@ -22,8 +23,11 @@ export LD_LIBRARY_PATH="$(
 )$LD_LIBRARY_PATH"
 
 uv run realtimeSTT.py
+```
 
 ## Running
 
+```bash
 cd ~/whisperai
 uv run realtimeSTT.py
+```
