@@ -2,3 +2,4 @@ __pycache__
 transcript*
 prompt.txt
 blacklistwords.txt
+.venv
