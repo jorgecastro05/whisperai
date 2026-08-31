@@ -1,7 +1,49 @@
+import os
+
+# Route this process's default audio input to the DJI mic via PipeWire's
+# pulse-compatibility layer. This must be set before pyaudio/PortAudio
+# initializes, so PipeWire handles rate conversion (e.g. 48kHz -> 16kHz)
+# instead of PortAudio trying to open the source's native format directly,
+# which fails validation and can crash the process.
+os.environ.setdefault(
+    "PULSE_SOURCE",
+    "alsa_input.usb-DJI_Technology_Co.__Ltd._DJI_MIC_MINI_XSP12345678B-01.analog-stereo",
+)
+
+import ctypes
+
+# Silence harmless ALSA lib stderr noise (unknown PCM cards.pcm.rear/hdmi/
+# modem/etc, dmix "unable to open slave"). These come from alsa-lib probing
+# generic surround/hdmi/modem slots defined in the system's default
+# alsa.conf that don't exist on this hardware -- cosmetic only, doesn't
+# affect functionality. Must be set before any PyAudio()/Pa_Initialize call.
+_ALSA_ERROR_HANDLER = ctypes.CFUNCTYPE(
+    None, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p
+)
+
+
+def _noop_alsa_error_handler(filename, line, function, err, fmt):
+    pass
+
+
+_c_alsa_error_handler = _ALSA_ERROR_HANDLER(_noop_alsa_error_handler)
+
+
+def suppress_alsa_errors():
+    try:
+        asound = ctypes.cdll.LoadLibrary("libasound.so.2")
+        asound.snd_lib_error_set_handler(_c_alsa_error_handler)
+    except OSError:
+        pass  # libasound not found under this name; skip silently
+
+
+#Uncomment for debug alsa errors
+suppress_alsa_errors()
+
 from RealtimeSTT import AudioToTextRecorder
 from RealtimeSTT.transcription_engines.base import BaseTranscriptionEngine
-import os
 import time
+import pyaudio
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 from http.server import ThreadingHTTPServer
@@ -29,6 +71,36 @@ stop_event = threading.Event()
 server = None  # global reference
 recorder = None
 shutting_down = False
+
+
+def find_input_device_index(name_substr, fallback=None):
+    """Return the PortAudio device index whose name contains name_substr
+    (case-insensitive) and has at least one input channel. Note: this index
+    is PortAudio's own numbering and will NOT match pw-top/pw-dump IDs."""
+    p = pyaudio.PyAudio()
+    try:
+        for i in range(p.get_device_count()):
+            info = p.get_device_info_by_index(i)
+            if (name_substr.lower() in info.get('name', '').lower()
+                    and info.get('maxInputChannels', 0) > 0):
+                print(f"Found input device [{i}]: {info['name']}")
+                return i
+    finally:
+        p.terminate()
+    print(f"Warning: no input device matching '{name_substr}' found, using fallback={fallback}")
+    return fallback
+
+
+def list_input_devices():
+    """Debug helper: print all PortAudio devices with input channels."""
+    p = pyaudio.PyAudio()
+    try:
+        for i in range(p.get_device_count()):
+            info = p.get_device_info_by_index(i)
+            if info.get('maxInputChannels', 0) > 0:
+                print(f"[{i}] {info['name']} (in ch: {info['maxInputChannels']})")
+    finally:
+        p.terminate()
 
 
 def load_file(file_path):
@@ -171,34 +243,39 @@ if __name__ == '__main__':
     unknown_sentence_detection_pause = 0.7
 
     recorder_config = {
-        'spinner': False,
-        #'model': 'large-v2', # or large-v2 or deepdml/faster-whisper-large-v3-turbo-ct2 or ...
-        'download_root': None, # default download root location. Ex. ~/.cache/huggingface/hub/ in Linux
-        # 'input_device_index': 1,
-        'realtime_model_type': 'small.en', # or small.en or distil-small.en or ...
-        'language': 'en',
-        'silero_sensitivity': 0.05,
-        'webrtc_sensitivity': 3,
-        'post_speech_silence_duration': unknown_sentence_detection_pause,
-        'min_length_of_recording': 1.5,        
-        'min_gap_between_recordings': 0,                
-        'enable_realtime_transcription': True,
-        'realtime_processing_pause': 0.02,
-        #'on_realtime_transcription_update': realtime_update,
-        #'on_realtime_transcription_update': text_detected,
-        'on_realtime_transcription_stabilized': realtime_update,
-        'silero_deactivity_detection': True,
-        'early_transcription_on_silence': 0,
-        'beam_size': 1,
-        'beam_size_realtime': 1,
-        # 'batch_size': 0,
-        # 'realtime_batch_size': 0,        
-        'no_log_file': True,
-        'initial_prompt_realtime': load_file(PROMPT_FILE),
-        'silero_use_onnx': True,
-        'faster_whisper_vad_filter': False,
-        'initial_prompt': load_file(PROMPT_FILE)
-    }
+    'spinner': False,
+    'device': 'cpu',
+
+    # --- Final transcript: Parakeet, decoded once per turn ---
+    'transcription_engine': 'sherpa_onnx_parakeet',
+    'model': './models/sherpa-onnx/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8',
+    'transcription_engine_options': {
+        'num_threads': 4,
+        'provider': 'cpu',
+    },
+
+    # --- Realtime/partial transcript: Nemotron streaming ---
+    'enable_realtime_transcription': True,
+    'realtime_transcription_engine': 'sherpa_onnx_nemotron',
+    'realtime_model_type': './models/sherpa-onnx/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11',
+    'realtime_transcription_engine_options': {
+        'num_threads': 2,
+        'provider': 'cpu',
+    },
+    'realtime_processing_pause': 0.15,
+    'on_realtime_transcription_stabilized': realtime_update,
+
+    'language': 'en',
+    'silero_sensitivity': 0.05,
+    'webrtc_sensitivity': 3,
+    'post_speech_silence_duration': unknown_sentence_detection_pause,
+    'min_length_of_recording': 1.5,
+    'min_gap_between_recordings': 0,
+    'silero_deactivity_detection': True,
+    'early_transcription_on_silence': 0,
+    'no_log_file': True,
+    'silero_use_onnx': True,
+     }
 
     # Start recorder in background thread
     recorder_thread = threading.Thread(target=recorder_loop, daemon=True)

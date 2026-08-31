@@ -3,3 +3,5 @@ transcript*
 prompt.txt
 blacklistwords.txt
 .venv
+models
+hotwords.txt
