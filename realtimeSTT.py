@@ -63,6 +63,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROMPT_FILE = os.path.join(BASE_DIR, "prompt.txt")
 HTML_FILE = os.path.join(BASE_DIR, "captions.html")
 BLACKLIST_FILE = os.path.join(BASE_DIR, "blacklistwords.txt")
+CORRECTIONS_FILE = os.path.join(BASE_DIR, "corrections.txt")
+# Generated at startup: corrections.txt words tokenized into BPE subwords
+# so sherpa-onnx can look them up in tokens.txt
+HOTWORDS_FILE = os.path.join(BASE_DIR, "hotwords_tokenized.txt")
 
 latest_text = ""
 last_update = 0
@@ -115,8 +119,97 @@ def clean_word(word):
 def load_blacklist():
     return load_file(BLACKLIST_FILE).splitlines()
 
+def load_corrections():
+    """Load hotwords from corrections.txt.
+    Each non-empty line is a word or phrase the STT engine should bias
+    toward recognising (similar to Whisper's initial_prompt context).
+    Returns a list of stripped, lowercased entries."""
+    if not os.path.exists(CORRECTIONS_FILE):
+        return []
+    with open(CORRECTIONS_FILE, "r", encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
+
+def apply_corrections(text, corrections):
+    """Post-process: case-insensitively replace approximate matches with the
+    exact hotword spelling from corrections.txt.  This handles cases where the
+    beam-search biasing didn't fully correct a close-but-wrong transcription."""
+    for word in corrections:
+        # Build a whole-word, case-insensitive regex for each hotword/phrase
+        pattern = re.compile(r'\b' + re.escape(word) + r'\b', re.IGNORECASE)
+        text = pattern.sub(word, text)
+    return text
+
+
+def build_hotwords_file(corrections, tokens_txt_path, output_path):
+    """Tokenize each word/phrase in corrections into BPE subword tokens using
+    greedy longest-match against the model's tokens.txt, then write them to
+    output_path in the format sherpa-onnx expects (space-separated tokens,
+    one phrase per line).  Returns the output path if any hotwords were written,
+    or '' if the tokens file is missing or no words could be encoded."""
+    if not os.path.exists(tokens_txt_path):
+        print(f"Warning: tokens.txt not found at {tokens_txt_path}, skipping hotword biasing")
+        return ''
+
+    # Build vocab: token_str -> id
+    vocab = {}
+    with open(tokens_txt_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            parts = line.rsplit(" ", 1)
+            if len(parts) == 2:
+                vocab[parts[0]] = int(parts[1])
+
+    def tokenize_word(word):
+        """Greedy longest-match BPE; first subword gets ▁ word-boundary prefix."""
+        tokens = []
+        remaining = word
+        first = True
+        while remaining:
+            matched = None
+            for length in range(len(remaining), 0, -1):
+                candidate = ("▁" if first else "") + remaining[:length]
+                if candidate in vocab:
+                    matched = candidate
+                    remaining = remaining[length:]
+                    first = False
+                    break
+            if matched is None:
+                return None  # unknown character — skip this word
+            tokens.append(matched)
+        return tokens
+
+    encoded_lines = []
+    for phrase in corrections:
+        # Tokenize each word in the phrase separately
+        phrase_tokens = []
+        ok = True
+        for word in phrase.lower().split():
+            toks = tokenize_word(word)
+            if toks is None:
+                print(f"Warning: could not tokenize '{word}' from corrections — skipping phrase '{phrase}'")
+                ok = False
+                break
+            phrase_tokens.extend(toks)
+        if ok and phrase_tokens:
+            encoded_lines.append(" ".join(phrase_tokens))
+
+    if not encoded_lines:
+        print("Warning: no corrections could be tokenized; hotword biasing disabled")
+        return ''
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(encoded_lines) + "\n")
+
+    print(f"Hotwords file written: {output_path}")
+    for phrase, line in zip(corrections, encoded_lines):
+        print(f"  {phrase!r:20s} -> {line}")
+    return output_path
+
+
 blacklist = load_blacklist()
-print(blacklist)
+corrections = load_corrections()
+print("Blacklist:", blacklist)
+print("Hotword corrections:", corrections)
 
 def process_text(text):
     global latest_text, last_update
@@ -129,7 +222,10 @@ def process_text(text):
         if clean not in cleaned_blacklist:
             filtered_words.append(word)
 
-    latest_text = " ".join(filtered_words)
+    text_out = " ".join(filtered_words)
+    # Apply hotword corrections: normalise spelling to the exact terms in corrections.txt
+    text_out = apply_corrections(text_out, corrections)
+    latest_text = text_out
     last_update = time.time()
 
 
@@ -183,7 +279,10 @@ def realtime_update(text):
         if clean not in cleaned_blacklist:
             filtered_words.append(word)
 
-    latest_text = " ".join(filtered_words)
+    text_out = " ".join(filtered_words)
+    # Apply hotword corrections: normalise spelling to the exact terms in corrections.txt
+    text_out = apply_corrections(text_out, corrections)
+    latest_text = text_out
     last_update = time.time()
 
 
@@ -252,6 +351,9 @@ if __name__ == '__main__':
     'transcription_engine_options': {
         'num_threads': 4,
         'provider': 'cpu',
+        # NOTE: The NeMo Parakeet TDT model does not include a sentencepiece
+        # vocabulary file, so sherpa-onnx cannot encode hotwords internally.
+        # Hotword spelling is corrected via apply_corrections() post-processing.
     },
 
     # --- Realtime/partial transcript: Nemotron streaming ---
@@ -261,6 +363,9 @@ if __name__ == '__main__':
     'realtime_transcription_engine_options': {
         'num_threads': 2,
         'provider': 'cpu',
+        # NOTE: Nemotron's NeMo transducer only supports greedy_search;
+        # modified_beam_search is unsupported, so hotwords_file cannot be used
+        # here. Hotword spelling is corrected in post-processing via apply_corrections().
     },
     'realtime_processing_pause': 0.15,
     'on_realtime_transcription_stabilized': realtime_update,
